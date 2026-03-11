@@ -1,0 +1,588 @@
+{
+  "name": "n8n-hubspot-crm-automation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "/lead-intake",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -400,
+        80
+      ],
+      "id": "99ce319d-ae2f-4ee8-a550-e37ce78a8118",
+      "name": "Inbound Lead Webhook",
+      "webhookId": "9fda9fcd-aff0-4eb3-9989-139dc2c85678"
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $json;\nreturn [{\n  ...j,\n  email: j.email ? String(j.email).toLowerCase().trim() : \"\",\n  phone: j.phone ? String(j.phone).replace(/\\s+/g,'').trim() : \"\",\n  website: j.website ? String(j.website).trim() : \"\",\n  city: j.city ? String(j.city).toLowerCase().trim() : \"\",\n  business_name: j.business_name ? String(j.business_name).trim() : \"\"\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -176,
+        80
+      ],
+      "id": "37a8869e-0723-4909-8d8e-ff5717149c5a",
+      "name": "Normalize Lead Payload"
+    },
+    {
+      "parameters": {
+        "jsCode": "let score = 0;\nif ($json.phone) score += 20;\nif ($json.website) score += 15;\nif ($json.rating >= 4.3) score += 15;\nif ($json.reviews >= 50) score += 15;\nif ($json.city === \"dhaka\") score += 10;\nif ($json.source) score += 5;\n\nlet status = \"NEW\";\nif (score >= 80) status = \"HOT\";\nelse if (score >= 60) status = \"QUALIFIED\";\n\nreturn [{ ...$json, lead_score: score, ai_lead_status: status }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        48,
+        80
+      ],
+      "id": "4daaaead-ad02-43b9-a70c-fee61b02ffbb",
+      "name": "Compute Lead Score & Structure"
+    },
+    {
+      "parameters": {
+        "authentication": "appToken",
+        "operation": "search",
+        "filterGroupsUi": {
+          "filterGroupsValues": [
+            {
+              "filtersUi": {
+                "filterValues": [
+                  {
+                    "propertyName": "email|string",
+                    "value": "={{ $json.body.email }}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2.2,
+      "position": [
+        272,
+        80
+      ],
+      "id": "15fac063-602b-4df4-b4b4-353261864700",
+      "name": "Find Existing Contact ",
+      "alwaysOutputData": true,
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "5pavpe0tvrsxlCgJ",
+          "name": "HubSpot App Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $json;\n\n// Try to find contact id from different possible shapes\nconst possibleId =\n  d.id ??\n  d.vid ??\n  d.contactId ??\n  d?.results?.[0]?.id ??\n  d?.data?.results?.[0]?.id ??\n  d?.body?.results?.[0]?.id ??\n  null;\n\nreturn [{\n  ...d,\n  found: Boolean(possibleId),\n  contactId: possibleId\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        80
+      ],
+      "id": "52ac3c64-7a3e-4fbc-a6ed-c27f74ad67af",
+      "name": "Prepare Contact Upsert Data"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "fc1c7609-30ae-4cdd-ac54-4eee8ef3190c",
+              "leftValue": "={{ $json.found }}",
+              "rightValue": 1,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        720,
+        80
+      ],
+      "id": "3053e712-5388-4449-9d88-661b1b3f3136",
+      "name": "Contact Exists?",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "authentication": "appToken",
+        "email": "={{ $('Normalize Lead Payload').item.json.body.email }}",
+        "additionalFields": {
+          "city": "={{ $('Compute Lead Score & Structure').item.json.body.city }}",
+          "customPropertiesUi": {
+            "customPropertiesValues": [
+              {
+                "property": "ai_lead_status",
+                "value": "={{ $('Compute Lead Score & Structure').item.json.ai_lead_status }}"
+              },
+              {
+                "property": "lead_score",
+                "value": "={{ $('Compute Lead Score & Structure').item.json.lead_score }}"
+              }
+            ]
+          },
+          "phoneNumber": "={{ $('Compute Lead Score & Structure').item.json.body.phone }}",
+          "websiteUrl": "={{ $('Compute Lead Score & Structure').item.json.body.website }}"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2.2,
+      "position": [
+        944,
+        -16
+      ],
+      "id": "c86c777c-4cf4-4954-93b6-45d9e270748f",
+      "name": "Upsert Contact (HubSpot)",
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "5pavpe0tvrsxlCgJ",
+          "name": "HubSpot App Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "appToken",
+        "resource": "deal",
+        "stage": "=appointmentscheduled",
+        "additionalFields": {
+          "dealName": "={{ $('Compute Lead Score & Structure').item.json.body.business_name|| $('Normalize Lead Payload').item.json.body.company}}-{{ $('Compute Lead Score & Structure').item.json.ai_lead_status }}"
+        }
+      },
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2.2,
+      "position": [
+        1840,
+        -16
+      ],
+      "id": "a4963aac-17ae-4a1d-9a27-c0b765af24a5",
+      "name": "Create Sales Deal (HubSpot)",
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "5pavpe0tvrsxlCgJ",
+          "name": "HubSpot App Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d0884395-0ff5-47b9-80f5-425c1697a295",
+              "name": "dealId",
+              "value": "={{ $('Find Existing Deal').item.json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "7c217e6a-bc70-42ed-9f25-5ec4c7464e8f",
+              "name": "contactId",
+              "value": "={{ $('Store Contact ID').item.json.contactId }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2064,
+        80
+      ],
+      "id": "1c0a4345-1117-4a85-9482-317a2d130b7f",
+      "name": "Set Association IDs"
+    },
+    {
+      "parameters": {
+        "authentication": "appToken",
+        "resource": "deal",
+        "operation": "search",
+        "filterGroupsUi": {
+          "filterGroupsValues": [
+            {
+              "filtersUi": {
+                "filterValues": [
+                  {
+                    "propertyName": "dealname",
+                    "value": "={{ $('Compute Lead Score & Structure').item.json.body.business_name||$('Compute Lead Score & Structure').item.json.body.company }}-{{ $('Compute Lead Score & Structure').item.json.ai_lead_status }}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2.2,
+      "position": [
+        1392,
+        80
+      ],
+      "id": "8b46573b-de74-430d-b699-c43d3cfd0508",
+      "name": "Find Existing Deal",
+      "alwaysOutputData": true,
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "5pavpe0tvrsxlCgJ",
+          "name": "HubSpot App Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c6fc43fe-419c-42c6-9608-eb3ab9de330c",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1616,
+        80
+      ],
+      "id": "92a4e334-c423-4eff-9d3c-6ad0035b5e4f",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5a6c9749-2cbd-4a25-98f2-b421bd90a7a5",
+              "name": "contactId",
+              "value": "={{ $json.vid || $json.id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1168,
+        80
+      ],
+      "id": "f3142097-8afb-4f7c-9390-77a6016617b4",
+      "name": "Store Contact ID"
+    },
+    {
+      "parameters": {
+        "authentication": "appToken",
+        "operation": "search",
+        "filterGroupsUi": {
+          "filterGroupsValues": [
+            {
+              "filtersUi": {
+                "filterValues": [
+                  {
+                    "propertyName": "email|string",
+                    "value": "={{ $json.properties.email }}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2.2,
+      "position": [
+        944,
+        176
+      ],
+      "id": "492bd5ee-a1c8-48b2-88a4-49cfe5304107",
+      "name": "Search contacts",
+      "alwaysOutputData": true,
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "5pavpe0tvrsxlCgJ",
+          "name": "HubSpot App Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://api.hubapi.com/crm/v3/objects/deals/{{ $json.dealId }}/associations/contacts/{{ $json.contactId }}/deal_to_contact",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2288,
+        80
+      ],
+      "id": "5507c094-a534-4bf0-85e2-5ea711420fad",
+      "name": "Associate Deal to Connect",
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "5pavpe0tvrsxlCgJ",
+          "name": "HubSpot App Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5bb5a173-9b21-4d07-ac5c-8c0626bf13b4",
+              "name": "dealId",
+              "value": "={{ $('Find Existing Deal').item.json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "5d08f659-389d-4745-98b3-d9c14516c2a6",
+              "name": "contactId",
+              "value": "={{ $('Store Contact ID').item.json.contactId }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1840,
+        176
+      ],
+      "id": "be76b8c9-a47e-4a91-adbe-520522a297a0",
+      "name": "Store Contact ID and Deal ID"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Inbound Lead Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Lead Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Lead Payload": {
+      "main": [
+        [
+          {
+            "node": "Compute Lead Score & Structure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Lead Score & Structure": {
+      "main": [
+        [
+          {
+            "node": "Find Existing Contact ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Existing Contact ": {
+      "main": [
+        [
+          {
+            "node": "Prepare Contact Upsert Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Contact Upsert Data": {
+      "main": [
+        [
+          {
+            "node": "Contact Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contact Exists?": {
+      "main": [
+        [
+          {
+            "node": "Search contacts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Upsert Contact (HubSpot)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Contact (HubSpot)": {
+      "main": [
+        [
+          {
+            "node": "Store Contact ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Sales Deal (HubSpot)": {
+      "main": [
+        [
+          {
+            "node": "Set Association IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Association IDs": {
+      "main": [
+        [
+          {
+            "node": "Associate Deal to Connect",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Existing Deal": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Create Sales Deal (HubSpot)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Store Contact ID and Deal ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Contact ID": {
+      "main": [
+        [
+          {
+            "node": "Find Existing Deal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search contacts": {
+      "main": [
+        [
+          {
+            "node": "Store Contact ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Contact ID and Deal ID": {
+      "main": [
+        [
+          {
+            "node": "Set Association IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "1c4327cd-33e1-476c-80b0-ce74f613a2ea",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "b38568f45c032e05142dcfa8ed26e63e163bf19fd6865373a0cfcc76d5e699e2"
+  },
+  "id": "8cSKDUWwriayugZo",
+  "tags": []
+}
